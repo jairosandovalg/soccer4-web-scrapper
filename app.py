@@ -9,6 +9,15 @@ st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
 st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Auto-Update)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
+# --- 1. INSTALACIÓN BLINDADA AL ARRANCAR LA APP (FUERA DE FRAGMENTS) ---
+if 'navegador_listo' not in st.session_state:
+    with st.spinner("Instalando componentes de Playwright en el servidor (Solo toma unos segundos)..."):
+        # Forzamos la instalación limpia con dependencias antes de que corra cualquier otra función
+        os.system("playwright install chromium --with-deps")
+        st.session_state['navegador_listo'] = True
+    st.rerun()  # Reinicia la app una sola vez para asegurar que reconozca las variables de entorno recién creadas
+
+# --- 2. EXTRACCIÓN DE DATOS DE PARTIDOS ---
 def extraer_estadisticas_partido(context, url_partido):
     """Abre una pestaña nueva, extrae la info de forma ultra rápida y la cierra para liberar RAM."""
     datos_partido = {
@@ -64,21 +73,18 @@ def extraer_estadisticas_partido(context, url_partido):
             
     return datos_partido
 
-# --- COMPONENTE DE ACTUALIZACIÓN AUTOMÁTICA (FRAGMENT) ---
-
+# --- 3. CONTENEDOR DINÁMICO (FRAGMENT) ---
 @st.fragment
 def contenedor_monitoreo_vivo():
     """Este bloque se ejecuta de forma independiente y se auto-refresca cada 60 segundos."""
     
-    # Marcador de tiempo de la última actualización
-    st.caption(f"🔄 Última actualización del sistema: **{time.strftime('%H:%M:%S')}** (Se actualiza solo cada 1 min)")
+    st.caption(f"🔄 Última actualización del sistema: **{time.strftime('%H:%M:%S')}** (Próximo escaneo automático en 1 min)")
     
-    # Contenedor dinámico para mostrar el estado actual del escaneo
     estado_placeholder = st.empty()
     barra_placeholder = st.empty()
     tabla_placeholder = st.empty()
 
-    estado_placeholder.info("Iniciando escaneo de partidos en directo...")
+    estado_placeholder.info("Conectando con la sección EN DIRECTO...")
     
     with sync_playwright() as p:
         browser = None
@@ -136,11 +142,9 @@ def contenedor_monitoreo_vivo():
                     
                     barra_progreso.progress((idx + 1) / len(partidos_elementos))
                 
-                # Limpiar los elementos visuales de carga una vez finalizado
                 barra_placeholder.empty()
                 estado_placeholder.empty()
                 
-                # Renderizar tabla finalizada
                 df_final = pd.DataFrame(lista_registros_finales).fillna("-")
                 columnas_fijas = ["Partido en Vivo", "Marcador", "Tiempo/Estado", "Minuto"]
                 columnas_stats = [col for col in df_final.columns if col not in columnas_fijas]
@@ -156,19 +160,9 @@ def contenedor_monitoreo_vivo():
             if browser:
                 browser.close()
 
-    # Este comando fuerza a este fragmento específico a volver a ejecutarse tras 60 segundos
     time.sleep(60)
     st.rerun()
 
-# --- FLUJO PRINCIPAL ---
-
-# Garantizar la instalación de dependencias una sola vez al arrancar la app globalmente
-if 'navegador_listo' not in st.session_state:
-    with st.spinner("Preparando entorno de Playwright en la nube (Solo la primera vez)..."):
-        os.system("playwright install chromium --with-deps")
-    st.session_state['navegador_listo'] = True
-
+# --- 4. RENDERIZADO PRINCIPAL ---
 st.write("### 📈 Cuadro de Control General (Actualización Automática)")
-
-# Inicializamos el fragmento automatizado
 contenedor_monitoreo_vivo()
