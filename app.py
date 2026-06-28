@@ -1,135 +1,159 @@
+import os
 import streamlit as st
 import pandas as pd
 import time
-import cloudscraper
-import re
+from playwright.sync_api import sync_playwright
 
 # Configuración de la interfaz de Streamlit
 st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
-st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Ultra-Light)")
+st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Playwright Pro)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
-def extraer_datos_api_flashscore():
-    """Obtiene los partidos en directo y sus métricas directamente simulando las peticiones del navegador."""
-    lista_registros_finales = []
-    
-    # Creamos un scraper que evade las protecciones básicas de Cloudflare de forma ligera
-    scraper = cloudscraper.create_scraper()
-    
+def extraer_estadisticas_partido(context, url_partido):
+    """Abre una pestaña nueva, extrae la info de forma ultra rápida y la cierra para liberar RAM."""
+    datos_partido = {
+        "Marcador": "- - -",
+        "Tiempo/Estado": "-",
+        "Minuto": "-",
+        "Stats": {}
+    }
+    page = None
     try:
-        # 1. Obtenemos el feed principal en vivo de la versión móvil (más ligera y rápida de procesar)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-            "X-Fsn": "f"
-        }
+        page = context.new_page()
+        # Bloquear elementos pesados para acelerar la carga analítica
+        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "font", "stylesheet"] else route.continue_())
         
-        # URL del feed interno de partidos en vivo de Flashscore Perú
-        url_feed = "https://m.flashscore.pe/x/feed/d_live_1_pe_1"
-        respuesta = scraper.get(url_feed, headers=headers, timeout=8)
+        page.goto(url_partido, timeout=7000, wait_until="domcontentloaded")
+        page.wait_for_selector("div.detailScore__wrapper", timeout=4000)
         
-        if respuesta.status_code != 200:
-            return None, f"Error de conexión con el servidor deportivo (Status {respuesta.status_code})"
+        marcador_el = page.locator("div.detailScore__wrapper").first
+        if marcador_el.count() > 0:
+            datos_partido["Marcador"] = marcador_el.text_content(timeout=500).strip()
             
-        texto_feed = respuesta.text
-        
-        # Separamos el texto por bloques de partidos usando los delimitadores nativos de su API (~AA)
-        bloques_partidos = texto_feed.split("~AA÷")
-        
-        partidos_activos = []
-        for bloque in bloques_partidos[1:]:  # Ignoramos la cabecera
-            lineas = bloque.split("~")
-            datos = {}
-            for linea in lineas:
-                if "÷" in linea:
-                    clave, valor = linea.split("÷", 1)
-                    datos[clave] = valor
-            partidos_activos.append(datos)
+        estado_el = page.locator("span.fixedHeaderDuel__detailStatus").first
+        if estado_el.count() > 0:
+            datos_partido["Tiempo/Estado"] = estado_el.text_content(timeout=500).strip()
             
-        if not partidos_activos:
-            return [], None
-
-        # Procesamos un máximo de 15 partidos concurrentes para no saturar y mantener la velocidad top
-        partidos_a_procesar = partidos_activos[:15]
-        
-        for idx, part in enumerate(partidos_a_procesar):
-            id_partido = part.get("ID", "")
-            if not id_partido:
-                continue
-                
-            nom_local = part.get("AE", "Local")
-            nom_visitante = part.get("AF", "Visitante")
-            marcador_local = part.get("AG", "0")
-            marcador_visitante = part.get("AH", "0")
-            estado_tiempo = part.get("AC", "-") # Ej: "1er Tiempo", "Descanso"
-            minuto_actual = part.get("AD", "-") # Ej: "35"
+        minuto_el = page.locator("span.eventTime").first
+        if minuto_el.count() > 0:
+            datos_partido["Minuto"] = minuto_el.text_content(timeout=500).strip()
             
-            # Limpieza de strings
-            if estado_tiempo == "45": estado_tiempo = "Descanso"
-            if estado_tiempo == "1": estado_tiempo = "1er Tiempo"
-            if estado_tiempo == "2": estado_tiempo = "2do Tiempo"
+        boton_stats = page.locator("//button[@role='tab' and contains(., 'Estadísticas')]").first
+        if boton_stats.count() > 0:
+            boton_stats.click(timeout=1000)
+            page.wait_for_selector("div[data-testid='wcl-statistics']", timeout=2000)
             
-            # Inicializamos el registro base del encuentro
-            registro = {
-                "Partido en Vivo": f"{nom_local} vs {nom_visitante}",
-                "Marcador": f"{marcador_local} - {marcador_visitante}",
-                "Tiempo/Estado": estado_tiempo,
-                "Minuto": f"{minuto_actual}'" if minuto_actual.isdigit() else minuto_actual
-            }
+            filas = page.locator("div[data-testid='wcl-statistics']").all()
+            for fila in filas:
+                cat_el = fila.locator("div[data-testid='wcl-statistics-category']").first
+                if cat_el.count() > 0:
+                    categoria = cat_el.text_content().strip()
+                    
+                    home_el = fila.locator("div[class*='wcl-homeValue']").first
+                    away_el = fila.locator("div[class*='wcl-awayValue']").first
+                    
+                    val_home = home_el.text_content().strip() if home_el.count() > 0 else "0"
+                    val_away = away_el.text_content().strip() if away_el.count() > 0 else "0"
+                    
+                    datos_partido["Stats"][f"{categoria} (L)"] = val_home
+                    datos_partido["Stats"][f"{categoria} (V)"] = val_away
+    except Exception:
+        pass
+    finally:
+        if page:
+            page.close()
             
-            # 2. Consultamos de forma asíncrona y directa las estadísticas numéricas de este ID
-            url_stats = f"https://local-pe.flashscore.ninja/x/feed/d_su_{id_partido}_es_1"
-            res_stats = scraper.get(url_stats, headers=headers, timeout=4)
-            
-            if res_stats.status_code == 200 and "wcl-statistics" in res_stats.text:
-                # Expresión regular veloz para capturar categorías y valores numéricos del feed crudo
-                # Evita usar costosos parsers visuales
-                matches = re.findall(r'wcl-statistics-category.*?>(.*?)<.*?wcl-homeValue.*?>(.*?)<.*?wcl-awayValue.*?>(.*?)</', res_stats.text)
-                for cat, home_val, away_val in matches:
-                    registro[f"{cat} (L)"] = home_val.strip()
-                    registro[f"{cat} (V)"] = away_val.strip()
-            
-            lista_registros_finales.append(registro)
-            
-        return lista_registros_finales, None
-        
-    except Exception as e:
-        return None, str(e)
+    return datos_partido
 
 # --- COMPONENTE DE ACTUALIZACIÓN AUTOMÁTICA (FRAGMENT) ---
 @st.fragment
 def contenedor_monitoreo_vivo():
-    """Bloque aislado que se refresca de forma automática cada 60 segundos por peticiones HTTP."""
+    """Este bloque se ejecuta de forma independiente y se auto-refresca cada 60 segundos."""
     st.caption(f"🔄 Última actualización del sistema: **{time.strftime('%H:%M:%S')}** (Próximo escaneo automático en 1 min)")
     
     estado_placeholder = st.empty()
+    barra_placeholder = st.empty()
     tabla_placeholder = st.empty()
 
-    estado_placeholder.info("Extrayendo métricas en tiempo real directamente desde el Feed...")
+    estado_placeholder.info("Conectando con la sección EN DIRECTO desde el navegador virtual...")
     
-    # Ejecutamos la consulta directa a los servidores de datos
-    datos, error = extraer_datos_api_flashscore()
-    
-    if error:
-        estado_placeholder.error(f"Error en la iteración actual: {error}")
-    elif not datos:
-        estado_placeholder.warning("No se detectaron partidos en directo activos en este momento.")
-    else:
-        estado_placeholder.empty() # Limpiamos el aviso de carga inmediatamente
-        
-        # Estructuración final de la tabla en Pandas
-        df_final = pd.DataFrame(datos).fillna("-")
-        columnas_fijas = ["Partido en Vivo", "Marcador", "Tiempo/Estado", "Minuto"]
-        
-        # Ordenamos dejando las estadísticas hacia la derecha
-        columnas_stats = [col for col in df_final.columns if col not in columnas_fijas]
-        df_final = df_final[columnas_fijas + columnas_stats]
-        
-        tabla_placeholder.dataframe(df_final, use_container_width=True)
+    with sync_playwright() as p:
+        browser = None
+        context = None
+        try:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            )
+            
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            
+            main_page = context.new_page()
+            main_page.goto("https://www.flashscore.pe/", wait_until="domcontentloaded")
+            
+            boton_directo = main_page.locator("//div[contains(@class, 'filters__text') and text()='EN DIRECTO']")
+            boton_directo.wait_for(state="visible", timeout=10000)
+            boton_directo.click()
+            
+            time.sleep(2.5)
+            
+            partidos_elementos = main_page.locator("div[id^='g_1_']").all()
+            
+            if not partidos_elementos:
+                estado_placeholder.warning("No se encontraron partidos en directo activos en este momento.")
+            else:
+                estado_placeholder.success(f"Analizando {len(partidos_elementos)} encuentros activos...")
+                
+                barra_progreso = barra_placeholder.progress(0)
+                lista_registros_finales = []
+                
+                for idx, fila in enumerate(partidos_elementos):
+                    id_completo = fila.get_attribute("id")
+                    id_partido = id_completo.split('_')[-1]
+                    url_match_stats = f"https://www.flashscore.pe/partido/{id_partido}/#/resumen/estadisticas"
+                    
+                    local_el = fila.locator("div[class*='home'][class*='participant']").first
+                    away_el = fila.locator("div[class*='away'][class*='participant']").first
+                    
+                    nom_local = local_el.text_content().strip() if local_el.count() > 0 else "Local"
+                    nom_visitante = away_el.text_content().strip() if away_el.count() > 0 else "Visitante"
+                    
+                    resultado_profundo = extraer_estadisticas_partido(context, url_match_stats)
+                    
+                    registro = {
+                        "Partido en Vivo": f"{nom_local} vs {nom_visitante}",
+                        "Marcador": resultado_profundo["Marcador"],
+                        "Tiempo/Estado": resultado_profundo["Tiempo/Estado"],
+                        "Minuto": resultado_profundo["Minuto"]
+                    }
+                    registro.update(resultado_profundo["Stats"])
+                    lista_registros_finales.append(registro)
+                    
+                    barra_progreso.progress((idx + 1) / len(partidos_elementos))
+                
+                barra_placeholder.empty()
+                estado_placeholder.empty()
+                
+                df_final = pd.DataFrame(lista_registros_finales).fillna("-")
+                columnas_fijas = ["Partido en Vivo", "Marcador", "Tiempo/Estado", "Minuto"]
+                columnas_stats = [col for col in df_final.columns if col not in columnas_fijas]
+                df_final = df_final[columnas_fijas + columnas_stats]
+                
+                tabla_placeholder.dataframe(df_final, use_container_width=True)
+                
+        except Exception as e:
+            estado_placeholder.error(f"Error en la iteración actual: {str(e)}")
+        finally:
+            if context:
+                context.close()
+            if browser:
+                browser.close()
 
-    # Pausa de un minuto y recarga automática del fragmento
     time.sleep(60)
     st.rerun()
 
-# --- RENDERIZADO PRINCIPAL ---
+# --- 4. RENDERIZADO PRINCIPAL ---
 st.write("### 📈 Cuadro de Control General (Actualización Automática)")
 contenedor_monitoreo_vivo()
