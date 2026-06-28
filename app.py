@@ -1,8 +1,7 @@
 import os
 import sys
 
-# --- CONFIGURACIÓN CRÍTICA PARA SERVIDORES NUBE ---
-# Forzamos a Playwright a buscar y guardar los navegadores en el directorio del proyecto
+# --- CONFIGURACIÓN DE RUTA PARA SERVIDORES NUBE ---
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0" 
 
 import streamlit as st
@@ -15,16 +14,16 @@ st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
 st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Auto-Update)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
-# --- 1. INSTALACIÓN MANDATORIA COMPROBADA ---
+# --- 1. INSTALACIÓN DE CHROMIUM (SIN --WITH-DEPS) ---
 if 'navegador_listo' not in st.session_state:
-    with st.spinner("Configurando entorno blindado de Playwright (Solo la primera vez)..."):
+    with st.spinner("Descargando binario de Chromium en el servidor..."):
         try:
-            # Ejecutamos la instalación usando el mismo ejecutable de Python del entorno virtual de Streamlit
             import subprocess
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"], check=True)
+            # Eliminamos --with-deps para evitar el error de permisos 'status 1'
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
             st.session_state['navegador_listo'] = True
         except Exception as e:
-            st.error(f"Error al instalar dependencias base: {str(e)}")
+            st.error(f"Error al inicializar el navegador: {str(e)}")
             st.stop()
     st.rerun()
 
