@@ -14,16 +14,21 @@ st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
 st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Auto-Update)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
-# --- 1. INSTALACIÓN DE CHROMIUM (SIN --WITH-DEPS) ---
+# --- 1. INSTALACIÓN AUTOMÁTICA INTELIGENTE EN LA NUBE ---
 if 'navegador_listo' not in st.session_state:
-    with st.spinner("Descargando binario de Chromium en el servidor..."):
+    with st.spinner("Configurando componentes de Playwright en el servidor..."):
         try:
             import subprocess
-            # Eliminamos --with-deps para evitar el error de permisos 'status 1'
+            # Descargamos primero el binario ligero de Chromium
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+            
+            # Forzamos a Playwright a resolver e instalar sus propias dependencias nativas del sistema operativo
+            # Esto evita que 'packages.txt' rompa los repositorios APT de la nube
+            subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=True)
+            
             st.session_state['navegador_listo'] = True
         except Exception as e:
-            st.error(f"Error al inicializar el navegador: {str(e)}")
+            st.error(f"Error al inicializar el entorno del navegador: {str(e)}")
             st.stop()
     st.rerun()
 
