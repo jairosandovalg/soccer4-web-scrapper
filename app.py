@@ -1,4 +1,10 @@
 import os
+import sys
+
+# --- CONFIGURACIÓN CRÍTICA PARA SERVIDORES NUBE ---
+# Forzamos a Playwright a buscar y guardar los navegadores en el directorio del proyecto
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0" 
+
 import streamlit as st
 import pandas as pd
 import time
@@ -9,13 +15,18 @@ st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
 st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Auto-Update)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
-# --- 1. INSTALACIÓN BLINDADA AL ARRANCAR LA APP (FUERA DE FRAGMENTS) ---
+# --- 1. INSTALACIÓN MANDATORIA COMPROBADA ---
 if 'navegador_listo' not in st.session_state:
-    with st.spinner("Instalando componentes de Playwright en el servidor (Solo toma unos segundos)..."):
-        # Forzamos la instalación limpia con dependencias antes de que corra cualquier otra función
-        os.system("playwright install chromium --with-deps")
-        st.session_state['navegador_listo'] = True
-    st.rerun()  # Reinicia la app una sola vez para asegurar que reconozca las variables de entorno recién creadas
+    with st.spinner("Configurando entorno blindado de Playwright (Solo la primera vez)..."):
+        try:
+            # Ejecutamos la instalación usando el mismo ejecutable de Python del entorno virtual de Streamlit
+            import subprocess
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"], check=True)
+            st.session_state['navegador_listo'] = True
+        except Exception as e:
+            st.error(f"Error al instalar dependencias base: {str(e)}")
+            st.stop()
+    st.rerun()
 
 # --- 2. EXTRACCIÓN DE DATOS DE PARTIDOS ---
 def extraer_estadisticas_partido(context, url_partido):
