@@ -9,8 +9,8 @@ libxkbcommon0
 libxcomposite1
 libxdamage1
 libxext6
-libxfixe3
-librandr2
+libxfixes3
+libxrandr2
 libgbm1
 libpango-1.0-0
 libcairo2
