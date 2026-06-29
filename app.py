@@ -1,14 +1,33 @@
 import os
+import sys
 import streamlit as st
 import pandas as pd
 import time
+import subprocess
+
+# --- 1. COMPROBACIÓN E INSTALACIÓN INTERNA DIRECTA ---
+if 'navegador_configurado' not in st.session_state:
+    with st.spinner("Inicializando binarios de Playwright en el servidor... (Solo la primera vez)"):
+        try:
+            # Descargamos el binario de chromium correspondiente a Playwright
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+            st.session_state['navegador_configurado'] = True
+        except Exception as e:
+            st.error(f"Error al inicializar el entorno del navegador: {str(e)}")
+            st.stop()
+            
+    from playwright.sync_api import sync_playwright
+    st.rerun()
+
+# Importación segura una vez garantizado el entorno
 from playwright.sync_api import sync_playwright
 
 # Configuración de la interfaz de Streamlit
 st.set_page_config(page_title="Bot de Estadísticas Final", layout="wide")
-st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Playwright Pro)")
+st.title("📊 Monitor de Estadísticas en Vivo - Flashscore (Auto-Update)")
 st.subheader("Análisis de métricas en tiempo real con actualización automática cada 60 segundos")
 
+# --- 2. EXTRACCIÓN DE DATOS DE PARTIDOS ---
 def extraer_estadisticas_partido(context, url_partido):
     """Abre una pestaña nueva, extrae la info de forma ultra rápida y la cierra para liberar RAM."""
     datos_partido = {
@@ -20,7 +39,7 @@ def extraer_estadisticas_partido(context, url_partido):
     page = None
     try:
         page = context.new_page()
-        # Bloquear elementos pesados para acelerar la carga analítica
+        # Bloquear elementos pesados para acelerar la carga analítica y ahorrar RAM
         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "font", "stylesheet"] else route.continue_())
         
         page.goto(url_partido, timeout=7000, wait_until="domcontentloaded")
@@ -38,6 +57,7 @@ def extraer_estadisticas_partido(context, url_partido):
         if minuto_el.count() > 0:
             datos_partido["Minuto"] = minuto_el.text_content(timeout=500).strip()
             
+        # Hacer clic en la pestaña de Estadísticas si existe
         boton_stats = page.locator("//button[@role='tab' and contains(., 'Estadísticas')]").first
         if boton_stats.count() > 0:
             boton_stats.click(timeout=1000)
@@ -65,7 +85,7 @@ def extraer_estadisticas_partido(context, url_partido):
             
     return datos_partido
 
-# --- COMPONENTE DE ACTUALIZACIÓN AUTOMÁTICA (FRAGMENT) ---
+# --- 3. CONTENEDOR DINÁMICO AUTOMÁTICO (FRAGMENT) ---
 @st.fragment
 def contenedor_monitoreo_vivo():
     """Este bloque se ejecuta de forma independiente y se auto-refresca cada 60 segundos."""
